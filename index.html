@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Motion Cue Sensor</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 80%;
+            max-width: 300px;
+            text-align: center;
+        }
+        input {
+            padding: 12px;
+            font-size: 16px;
+            text-align: center;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #222;
+            color: white;
+        }
+        button {
+            padding: 16px;
+            font-size: 18px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            background-color: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+        button:active {
+            background-color: #1d4ed8;
+        }
+        .status {
+            font-size: 14px;
+            font-weight: bold;
+            color: #9ca3af;
+        }
+        .data {
+            font-family: monospace;
+            font-size: 16px;
+            color: #10b981;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Sensor Stream</h2>
+        <input type="text" id="ipInput" placeholder="Laptop IP (e.g., 192.168.137.1)" value="192.168.137.1">
+        <button id="connectBtn">Connect Stream</button>
+        <div id="status" class="status">Disconnected</div>
+        <div id="dataDisplay" class="data">X: 0.00 | Y: 0.00</div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sensorData = { ax: 0, ay: 0 };
+        let sendInterval = null;
+        let isConnected = false;
+        
+        // Gravity filter state
+        let gravity = { x: 0, y: 0 };
+        const filterAlpha = 0.8; 
+
+        const connectBtn = document.getElementById('connectBtn');
+        const statusText = document.getElementById('status');
+        const dataDisplay = document.getElementById('dataDisplay');
+        const ipInput = document.getElementById('ipInput');
+
+        function connectWebSocket() {
+            const ip = ipInput.value.trim();
+            if (!ip) return;
+
+            statusText.textContent = "Connecting...";
+            statusText.style.color = "#fbbf24";
+            
+            ws = new WebSocket(`ws://${ip}:8765`);
+
+            ws.onopen = () => {
+                isConnected = true;
+                statusText.textContent = "Connected. Stabilizing...";
+                statusText.style.color = "#10b981";
+                
+                // 4. Connection readiness lock (500ms stabilization)
+                setTimeout(() => {
+                    statusText.textContent = "Streaming Live";
+                    startSending();
+                }, 500);
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                statusText.textContent = "Disconnected. Retrying in 2s...";
+                statusText.style.color = "#ef4444";
+                stopSending();
+                setTimeout(connectWebSocket, 2000); 
+            };
+
+            ws.onerror = (err) => {
+                ws.close();
+            };
+        }
+
+        function startSending() {
+            if (sendInterval) clearInterval(sendInterval);
+            sendInterval = setInterval(() => {
+                if (isConnected && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify(sensorData));
+                }
+            }, 33); // ~30Hz
+        }
+
+        function stopSending() {
+            if (sendInterval) clearInterval(sendInterval);
+            sendInterval = null;
+        }
+
+        function handleMotion(event) {
+            let rawX = 0, rawY = 0;
+
+            // 3. Gravity filtering & Fallback handling
+            if (event.acceleration && event.acceleration.x !== null) {
+                rawX = event.acceleration.x;
+                rawY = event.acceleration.y;
+            } else if (event.accelerationIncludingGravity) {
+                // High-pass filter to isolate linear acceleration
+                gravity.x = filterAlpha * gravity.x + (1 - filterAlpha) * event.accelerationIncludingGravity.x;
+                gravity.y = filterAlpha * gravity.y + (1 - filterAlpha) * event.accelerationIncludingGravity.y;
+                rawX = event.accelerationIncludingGravity.x - gravity.x;
+                rawY = event.accelerationIncludingGravity.y - gravity.y;
+            }
+
+            // 2. Axis consistency check based on screen orientation
+            let angle = 0;
+            if (screen.orientation && screen.orientation.angle !== undefined) {
+                angle = screen.orientation.angle;
+            } else if (typeof window.orientation !== 'undefined') {
+                angle = window.orientation;
+            }
+
+            if (angle === 90) {
+                sensorData.ax = rawY;
+                sensorData.ay = -rawX;
+            } else if (angle === -90 || angle === 270) {
+                sensorData.ax = -rawY;
+                sensorData.ay = rawX;
+            } else if (angle === 180) {
+                sensorData.ax = -rawX;
+                sensorData.ay = -rawY;
+            } else {
+                sensorData.ax = rawX;
+                sensorData.ay = rawY;
+            }
+
+            dataDisplay.textContent = `X: ${sensorData.ax.toFixed(2)} | Y: ${sensorData.ay.toFixed(2)}`;
+        }
+
+        async function initSensor() {
+            // 1. Missing permission handling restored safely
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission !== 'granted') {
+                        statusText.textContent = "Permission Denied";
+                        statusText.style.color = "#ef4444";
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Permission API error or skipped", e);
+                }
+            }
+
+            window.addEventListener('devicemotion', handleMotion);
+            connectWebSocket();
+            connectBtn.style.display = 'none';
+        }
+
+        connectBtn.addEventListener('click', initSensor);
+    </script>
+</body>
+</html>
