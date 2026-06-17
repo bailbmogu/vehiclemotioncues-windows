@@ -75,7 +75,7 @@
         let sendInterval = null;
         let isConnected = false;
         
-        // Gravity filter state
+        // gravity do things
         let gravity = { x: 0, y: 0 };
         const filterAlpha = 0.8; 
 
@@ -98,7 +98,6 @@
                 statusText.textContent = "Connected. Stabilizing...";
                 statusText.style.color = "#10b981";
                 
-                // 4. Connection readiness lock (500ms stabilization)
                 setTimeout(() => {
                     statusText.textContent = "Streaming Live";
                     startSending();
@@ -135,19 +134,18 @@
         function handleMotion(event) {
             let rawX = 0, rawY = 0;
 
-            // 3. Gravity filtering & Fallback handling
+          
             if (event.acceleration && event.acceleration.x !== null) {
                 rawX = event.acceleration.x;
                 rawY = event.acceleration.y;
             } else if (event.accelerationIncludingGravity) {
-                // High-pass filter to isolate linear acceleration
+  
                 gravity.x = filterAlpha * gravity.x + (1 - filterAlpha) * event.accelerationIncludingGravity.x;
                 gravity.y = filterAlpha * gravity.y + (1 - filterAlpha) * event.accelerationIncludingGravity.y;
                 rawX = event.accelerationIncludingGravity.x - gravity.x;
                 rawY = event.accelerationIncludingGravity.y - gravity.y;
             }
 
-            // 2. Axis consistency check based on screen orientation
             let angle = 0;
             if (screen.orientation && screen.orientation.angle !== undefined) {
                 angle = screen.orientation.angle;
@@ -173,7 +171,7 @@
         }
 
         async function initSensor() {
-            // 1. Missing permission handling restored safely
+  
             if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceMotionEvent.requestPermission();
