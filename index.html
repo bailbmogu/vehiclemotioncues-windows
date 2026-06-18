@@ -75,7 +75,7 @@
         let sendInterval = null;
         let isConnected = false;
         
-        // gravity do things
+        // Gravity filter state
         let gravity = { x: 0, y: 0 };
         const filterAlpha = 0.8; 
 
@@ -85,8 +85,11 @@
         const ipInput = document.getElementById('ipInput');
 
         function connectWebSocket() {
-            const ip = ipInput.value.trim();
+            let ip = ipInput.value.trim();
             if (!ip) return;
+
+            // Strip accidental 'http://' or 'ws://' pasted by autocomplete
+            ip = ip.replace(/^(https?:\/\/|ws:\/\/)/, '').replace(/\/$/, '');
 
             statusText.textContent = "Connecting...";
             statusText.style.color = "#fbbf24";
@@ -98,6 +101,7 @@
                 statusText.textContent = "Connected. Stabilizing...";
                 statusText.style.color = "#10b981";
                 
+                // Stabilization lock
                 setTimeout(() => {
                     statusText.textContent = "Streaming Live";
                     startSending();
@@ -134,18 +138,19 @@
         function handleMotion(event) {
             let rawX = 0, rawY = 0;
 
-          
-            if (event.acceleration && event.acceleration.x !== null) {
+            // Fallback logic: If acceleration is empty or explicitly zeroes out, use gravity vector
+            if (event.acceleration && typeof event.acceleration.x === 'number' && event.acceleration.x !== 0) {
                 rawX = event.acceleration.x;
                 rawY = event.acceleration.y;
-            } else if (event.accelerationIncludingGravity) {
-  
+            } else if (event.accelerationIncludingGravity && typeof event.accelerationIncludingGravity.x === 'number') {
+                // High-pass filter to isolate linear acceleration
                 gravity.x = filterAlpha * gravity.x + (1 - filterAlpha) * event.accelerationIncludingGravity.x;
                 gravity.y = filterAlpha * gravity.y + (1 - filterAlpha) * event.accelerationIncludingGravity.y;
                 rawX = event.accelerationIncludingGravity.x - gravity.x;
                 rawY = event.accelerationIncludingGravity.y - gravity.y;
             }
 
+            // Axis consistency check based on screen orientation
             let angle = 0;
             if (screen.orientation && screen.orientation.angle !== undefined) {
                 angle = screen.orientation.angle;
@@ -171,7 +176,7 @@
         }
 
         async function initSensor() {
-  
+            // Missing permission handling restored safely
             if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceMotionEvent.requestPermission();
